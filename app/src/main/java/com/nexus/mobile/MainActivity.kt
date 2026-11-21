@@ -1,8 +1,11 @@
 package com.nexus.mobile
 
+import android.app.Activity
 import android.content.Context
+import android.widget.Toast
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -51,7 +55,29 @@ class MainActivity : ComponentActivity() {
 private fun NexusApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences("nexus_v110", Context.MODE_PRIVATE) }
-    var page by remember { mutableStateOf("Home") }
+    var page by remember { mutableStateOf(if (prefs.getBoolean("setup_complete", false)) "Home" else "Installer") }
+    val activity = context as? Activity
+    var lastExitPress by remember { mutableLongStateOf(0L) }
+    var gtaInstalled by remember { mutableStateOf(GameInstallDetector.isInstalled(context)) }
+
+    fun requestExit() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastExitPress != 0L && now - lastExitPress <= 2200L) {
+            activity?.finish()
+        } else {
+            lastExitPress = now
+            Toast.makeText(context, "Tekan sekali lagi untuk keluar dari NEXUS", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    BackHandler {
+        if (page != "Home") {
+            page = "Home"
+            lastExitPress = 0L
+        } else {
+            requestExit()
+        }
+    }
     var nickname by remember { mutableStateOf(prefs.getString("nick", "Player_Username") ?: "Player_Username") }
     var servers by remember { mutableStateOf(readServers(prefs.getString("servers", "[]") ?: "[]")) }
     var showAdd by remember { mutableStateOf(false) }
@@ -71,7 +97,7 @@ private fun NexusApp() {
     var chatTimestamp by remember { mutableStateOf(prefs.getBoolean("chat_timestamp", true)) }
     var chatBackground by remember { mutableStateOf(prefs.getBoolean("chat_background", true)) }
     var radialKey by remember { mutableStateOf(prefs.getString("radial_key", "F11") ?: "F11") }
-    var notice by remember { mutableStateOf("NEXUS siap digunakan • Build 1.1.0") }
+    var notice by remember { mutableStateOf("NEXUS siap digunakan • Build 1.2.0") }
     var mods by remember { mutableStateOf(readMods(prefs.getString("mods", "[]") ?: "[]")) }
     var newMod by remember { mutableStateOf("") }
 
@@ -90,12 +116,23 @@ private fun NexusApp() {
     MaterialTheme(colorScheme = darkColorScheme(primary = Red, background = Bg, surface = Surface1, onBackground = Color.White)) {
         Surface(Modifier.fillMaxSize(), color = Bg) {
             Column(Modifier.fillMaxSize()) {
-                Header(onAbout = { showAbout = true })
+                Header(onAbout = { showAbout = true }, onExit = { requestExit() })
                 Box(Modifier.weight(1f)) {
                     when (page) {
+                        "Installer" -> InstallerPage(
+                            context = context,
+                            onGameDetected = { gtaInstalled = it },
+                            onContinue = {
+                                prefs.edit().putBoolean("setup_complete", true).apply()
+                                page = "Home"
+                                notice = if (gtaInstalled) "GTA San Andreas terdeteksi di perangkat." else "GTA SA belum terdeteksi. Pasang game resmi sebelum bermain."
+                            }
+                        )
                         "Home" -> HomePage(
-                            nickname, servers.size, notice,
-                            onConnect = { notice = "Multiplayer core belum tersedia. Belum ada koneksi game yang dijalankan." },
+                            nickname, servers.size, notice, gtaInstalled,
+                            onConnect = {
+                                notice = if (gtaInstalled) "GTA SA terdeteksi, tetapi client multiplayer belum dapat diintegrasikan sebelum lisensi dan kompatibilitasnya lolos pemeriksaan." else "GTA SA belum terdeteksi. Pasang game resmi terlebih dahulu."
+                            },
                             onServers = { page = "Servers" },
                             onProfile = { showProfile = true },
                             onRadial = { showRadial = true }
@@ -178,7 +215,7 @@ private fun NexusApp() {
     if (showAbout) AlertDialog(
         onDismissRequest = { showAbout = false }, containerColor = Surface1,
         title = { Text("NEXUS MOBILE", color = Color.White, fontWeight = FontWeight.Black) },
-        text = { Text("Version 1.1.0 • Android client UI prototype\n\nAplikasi ini menyediakan antarmuka, profil lokal, server list, dan preferensi konfigurasi. Belum menyertakan GTA San Andreas engine, SA-MP multiplayer core, voice transport, atau loader mod native.", color = Muted) },
+        text = { Text("Version 1.2.0 • Android client foundation\n\nAplikasi ini menyediakan antarmuka, profil lokal, server list, dan preferensi konfigurasi. Belum menyertakan GTA San Andreas engine, SA-MP multiplayer core, voice transport, atau loader mod native.", color = Muted) },
         confirmButton = { TextButton(onClick = { showAbout = false }) { Text("TUTUP", color = Red) } }
     )
     if (showRadial) RadialPreviewDialog(onDismiss = { showRadial = false }, onSelect = {
@@ -188,7 +225,7 @@ private fun NexusApp() {
 }
 
 @Composable
-private fun Header(onAbout: () -> Unit) {
+private fun Header(onAbout: () -> Unit, onExit: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Color(0xFF211519), Bg)))
             .padding(horizontal = 20.dp, vertical = 17.dp),
@@ -201,52 +238,59 @@ private fun Header(onAbout: () -> Unit) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text("NEXUS MOBILE", color = Muted, fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
-            Text("MULTIPLAYER", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            Text("SA-MP HUB", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
         }
         Surface(color = Color(0xFF2C1B20), shape = CircleShape) {
-            Text(" v1.1.0 ", color = Color(0xFFFFAAA5), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+            Text(" v1.2.0 ", color = Color(0xFFFFAAA5), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
         }
+        IconButton(onClick = onExit) { Icon(Icons.Default.ExitToApp, "Keluar", tint = Muted) }
         IconButton(onClick = onAbout) { Icon(Icons.Default.Info, "About", tint = Muted) }
     }
 }
 
 @Composable
-private fun HomePage(nick: String, serverCount: Int, notice: String, onConnect: () -> Unit, onServers: () -> Unit, onProfile: () -> Unit, onRadial: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Brush.linearGradient(listOf(Color(0xFF482126), Color(0xFF171D27), Color(0xFF10151D)))).padding(20.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("WELCOME BACK", color = Color(0xFFFFAAA5), fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
-                Text("Ready to play?", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black)
-                Text("Your multiplayer hub on Android.", color = Muted, fontSize = 13.sp)
-                Spacer(Modifier.height(4.dp))
-                Button(onClick = onConnect, colors = ButtonDefaults.buttonColors(containerColor = Red), shape = RoundedCornerShape(12.dp)) {
-                    Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("QUICK CONNECT", fontWeight = FontWeight.Bold)
+private fun HomePage(nick: String, serverCount: Int, notice: String, gameInstalled: Boolean, onConnect: () -> Unit, onServers: () -> Unit, onProfile: () -> Unit, onRadial: () -> Unit) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("NEXUS MOBILE", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Black)
+        Text("Mainkan bersama komunitas SA-MP", color = Muted, fontSize = 12.sp)
+        PanelCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Person, null, tint = Red)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("PROFILE", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(nick, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
+                TextButton(onClick = onProfile) { Text("EDIT", color = Red) }
             }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatCard("SAVED SERVERS", serverCount.toString(), Icons.Default.Dns, Modifier.weight(1f))
-            StatCard("CLIENT STATUS", "OFFLINE", Icons.Default.CloudOff, Modifier.weight(1f))
         }
         PanelCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Person, null, tint = Red); Spacer(Modifier.width(8.dp))
-                Text("PLAYER PROFILE", color = Muted, fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f)); TextButton(onClick = onProfile) { Text("EDIT", color = Red) }
+                Icon(if (gameInstalled) Icons.Default.CheckCircle else Icons.Default.Warning, null, tint = if (gameInstalled) Color(0xFF76D6A0) else Color(0xFFFFC36B))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("GTA SAN ANDREAS", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(if (gameInstalled) "Terpasang • terdeteksi" else "Belum terdeteksi", color = Muted, fontSize = 11.sp)
+                }
             }
-            Text(nick, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text("Nickname tersimpan di perangkat ini", color = Muted, fontSize = 11.sp)
+            Button(onClick = onConnect, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Red), shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Default.PlayArrow, null)
+                Spacer(Modifier.width(6.dp))
+                Text("MASUK / CONNECT", fontWeight = FontWeight.Bold)
+            }
+            Text("Koneksi multiplayer akan aktif setelah client native lolos pemeriksaan lisensi dan kompatibilitas.", color = Muted, fontSize = 10.sp)
         }
         PanelCard {
-            Text("QUICK ACCESS", color = Muted, fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                QuickTile("SERVER LIST", Icons.Default.Dns, onServers, Modifier.weight(1f))
-                QuickTile("PROFILE", Icons.Default.AccountCircle, onProfile, Modifier.weight(1f))
-                QuickTile("RADIAL F11", Icons.Default.GridView, onRadial, Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("SERVER TERSIMPAN", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("$serverCount server", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+                TextButton(onClick = onServers) { Text("BUKA", color = Red) }
             }
         }
+        TextButton(onClick = onRadial) { Icon(Icons.Default.GridView, null); Spacer(Modifier.width(6.dp)); Text("Preview radial menu") }
         Text(notice, color = Muted, fontSize = 11.sp)
-        Text("NEXUS IS AN INDEPENDENT COMMUNITY PROJECT", color = Color(0xFF596575), fontSize = 9.sp, letterSpacing = 1.sp)
     }
 }
 
@@ -288,34 +332,32 @@ private fun ServersPage(servers: List<Server>, onAdd: () -> Unit, onSelect: (Ser
 @Composable
 private fun SettingsPage(low: Boolean, onLow: (Boolean) -> Unit, fps: Boolean, onFps: (Boolean) -> Unit, notifications: Boolean, onNotifications: (Boolean) -> Unit, onOpen: (String) -> Unit, onAbout: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("SETTINGS", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
+        Text("PENGATURAN", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
         PanelCard {
-            Text("PREFERENCES", color = Muted, fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
-            SwitchRow("Low graphics preference", "Pilihan tersimpan; belum mengubah grafis game.", low, onLow)
+            Text("APLIKASI", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            SwitchRow("Low graphics", "Preferensi untuk integrasi game berikutnya.", low, onLow)
             HorizontalDivider(color = Surface2)
-            SwitchRow("FPS counter preference", "Preferensi tampilan untuk integrasi berikutnya.", fps, onFps)
+            SwitchRow("FPS counter", "Simpan preferensi penghitung FPS.", fps, onFps)
             HorizontalDivider(color = Surface2)
-            SwitchRow("Notifications", "Preferensi notifikasi aplikasi.", notifications, onNotifications)
+            SwitchRow("Notifikasi", "Preferensi notifikasi NEXUS.", notifications, onNotifications)
         }
         PanelCard {
-            Text("CLIENT MODULES", color = Muted, fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
-            ModuleRow("Keyboard & Mouse", "Atur input dan tombol radial", Icons.Default.Keyboard, { onOpen("Controls") })
-            ModuleRow("Mod Manager", "Daftar mod lokal (belum dimuat ke game)", Icons.Default.Folder, { onOpen("Mods") })
-            ModuleRow("Custom Chat", "Preferensi tampilan chat", Icons.Default.Chat, { onOpen("Chat") })
-            ModuleRow("Voice", "Preferensi voice client", Icons.Default.Mic, { onOpen("Voice") })
-            ModuleRow("Display", "Fullscreen dan preferensi grafis", Icons.Default.DisplaySettings, { onOpen("Display") })
+            Text("FITUR", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            ModuleRow("Game Installer", "Deteksi GTA SA dan komponen NEXUS", Icons.Default.Download, { onOpen("Installer") })
+            ModuleRow("Keyboard & Mouse", "Pengaturan input", Icons.Default.Keyboard, { onOpen("Controls") })
+            ModuleRow("Mod Manager", "Daftar mod lokal", Icons.Default.Folder, { onOpen("Mods") })
+            ModuleRow("Chat & Voice", "Preferensi tampilan dan suara", Icons.Default.Chat, { onOpen("Chat") })
+            ModuleRow("Display", "Preferensi tampilan", Icons.Default.DisplaySettings, { onOpen("Display") })
         }
         PanelCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Info, null, tint = Red); Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("NEXUS Mobile", color = Color.White, fontWeight = FontWeight.Bold)
-                    Text("Version 1.1.0 • Build 110", color = Muted, fontSize = 11.sp)
+                    Text("NEXUS MOBILE", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Version 1.2.0 • Build 120", color = Muted, fontSize = 11.sp)
                 }
                 TextButton(onClick = onAbout) { Text("ABOUT", color = Red) }
             }
         }
-        Text("Pengaturan disimpan otomatis di perangkat.", color = Muted, fontSize = 11.sp)
     }
 }
 
@@ -442,6 +484,78 @@ private fun DisplayPage(fullscreen: Boolean, onFullscreen: (Boolean) -> Unit, lo
             Text("Preset resolusi game belum diterapkan karena renderer game belum terintegrasi.", color = Muted, fontSize = 11.sp)
         }
         InfoNote("Fullscreen dan resolusi game yang sebenarnya perlu diterapkan pada jendela renderer GTA, bukan hanya pada halaman pengaturan ini.")
+    }
+}
+
+@Composable
+private fun InstallerPage(context: Context, onGameDetected: (Boolean) -> Unit, onContinue: () -> Unit) {
+    var gameInstalled by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(true) }
+    var progress by remember { mutableIntStateOf(0) }
+    var message by remember { mutableStateOf("Memeriksa instalasi dan komponen NEXUS...") }
+    val scope = rememberCoroutineScope()
+
+    fun runInstallerCheck() {
+        scope.launch {
+            checking = true
+            progress = 0
+            gameInstalled = GameInstallDetector.isInstalled(context)
+            onGameDetected(gameInstalled)
+            message = if (gameInstalled) "GTA San Andreas terdeteksi." else "GTA San Andreas belum terdeteksi."
+            try {
+                val result = NexusInstaller.sync(context) { update ->
+                    progress = update.percent
+                    message = update.message
+                }
+                message = if (result.total == 0) {
+                    "Pemeriksaan selesai. Belum ada komponen NEXUS yang dipublikasikan untuk diunduh."
+                } else {
+                    "Pemeriksaan selesai. ${result.completed}/${result.total} komponen berhasil diverifikasi."
+                }
+            } catch (_: Exception) {
+                message = "Komponen NEXUS belum bisa diperiksa. Periksa koneksi lalu coba lagi."
+            } finally {
+                checking = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { runInstallerCheck() }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("PERSIAPAN NEXUS", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Black)
+        Text("Pemeriksaan awal sebelum masuk ke launcher.", color = Muted, fontSize = 12.sp)
+        PanelCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (gameInstalled) Icons.Default.CheckCircle else Icons.Default.Warning, null, tint = if (gameInstalled) Color(0xFF76D6A0) else Color(0xFFFFC36B))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("GTA SAN ANDREAS", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(if (gameInstalled) "Terpasang pada perangkat" else "Belum ditemukan", color = Muted, fontSize = 11.sp)
+                }
+            }
+            Text("NEXUS hanya mendeteksi game yang sudah dipasang. Data GTA tidak diunduh atau disertakan oleh NEXUS.", color = Muted, fontSize = 11.sp)
+        }
+        PanelCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Download, null, tint = Red)
+                Spacer(Modifier.width(10.dp))
+                Text("KOMPONEN NEXUS", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+            LinearProgressIndicator(progress = progress / 100f, modifier = Modifier.fillMaxWidth(), color = Red, trackColor = Surface2)
+            Text(message, color = Muted, fontSize = 11.sp)
+        }
+        Button(onClick = { runInstallerCheck() }, enabled = !checking, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Surface2)) {
+            Icon(Icons.Default.Refresh, null)
+            Spacer(Modifier.width(6.dp))
+            Text("PERIKSA ULANG")
+        }
+        Button(onClick = onContinue, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
+            Text("LANJUT KE NEXUS", fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Default.ArrowForward, null)
+        }
+        Text("Pasang GTA San Andreas dari toko resmi secara terpisah. Fitur masuk server akan dibuka setelah client multiplayer yang kompatibel dan berlisensi berhasil diintegrasikan.", color = Muted, fontSize = 10.sp)
     }
 }
 

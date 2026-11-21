@@ -1,34 +1,27 @@
-# NEXUS Mobile v1.1.0 — Android UI Prototype
+# NEXUS Mobile v1.2.0 — Android Client Foundation
 
-NEXUS is an independent Android interface prototype for a future GTA San Andreas multiplayer client concept.
+NEXUS is an independent Android launcher foundation for a future GTA San Andreas multiplayer client.
 
-## Included
-- Home dashboard
-- Local server list management
-- Local nickname profile
-- Keyboard and mouse preference settings
-- Control binding preferences and radial menu preview
-- Local mod entry management
-- Custom chat preferences and preview
-- Voice-related preference settings
-- Display and graphics preferences
+## v1.2.0
+- First-launch setup screen
+- Detection of the installed Rockstar GTA San Andreas Android package
+- Manifest-driven NEXUS component downloader
+- HTTPS source allow-list, file-size limits, SHA-256 verification, and download progress
+- Local server address list and simplified launcher UI
+- Double-press exit confirmation in the NEXUS launcher
 
 ## Important limitations
-This version is an Android UI prototype. It does not include the GTA San Andreas game engine, SA-MP multiplayer core, actual server connection, native mod loader, voice transport, or working in-game keyboard/mouse input. Settings currently save preferences locally and do not modify an actual game engine.
+- NEXUS does not download, bundle, or redistribute GTA San Andreas game data. Install the game separately from an official store using your own account.
+- The component manifest currently contains no published packages. The downloader only accepts items explicitly marked redistributable with a license identifier and a SHA-256 checksum.
+- The server list stores hostnames and ports locally. Actual joining of public SA-MP servers is not enabled yet because a compatible client core has not passed source-license and runtime-compatibility review.
+- The double-press exit protection currently applies to the NEXUS launcher. It cannot intercept the exit control inside a separate SA-MP game process until a native client is integrated.
+- Keyboard/mouse, mods, chat, voice, and graphics pages remain preference or preview screens; they do not yet control a running game.
 
-## Build APK using GitHub Actions
-1. Push this project to the `main` branch of a GitHub repository.
-2. Open the repository's Actions tab.
-3. Select **Build NEXUS APK**.
-4. Choose **Run workflow**.
-5. Wait for the workflow to finish successfully.
-6. Download the artifact **NEXUS-Mobile-v1.1.0-APK**.
-7. Extract the artifact ZIP to obtain `NEXUS-Mobile-v1.1.0-debug.apk`.
-
-The APK is not included in this source ZIP. It must be built by GitHub Actions or Android Studio.
+## Build APK with GitHub Actions
+1. Open the repository Actions tab.
+2. Choose **Build NEXUS APK** and run the workflow, or push to **main**.
+3. Download the artifact **NEXUS-Mobile-v1.2.0-APK**.
+4. Extract NEXUS-Mobile-v1.2.0-debug.apk and install it on Android.
 
 ## Build locally
-Open the project in Android Studio, sync Gradle, then run the `assembleDebug` task.
-
-The expected APK output is:
-`app/build/outputs/apk/debug/app-debug.apk`
+Open the project in Android Studio and run ./gradlew :app:assembleDebug.
