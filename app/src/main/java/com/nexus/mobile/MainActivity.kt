@@ -6,6 +6,8 @@ import android.widget.Toast
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,7 +42,7 @@ private val Surface1 = Color(0xFF141A23)
 private val Surface2 = Color(0xFF1D2633)
 private val Red = Color(0xFFE53935)
 private val Muted = Color(0xFF9AA7B8)
-private data class Server(val name: String, val host: String, val port: Int, val ucpApi: String = "")
+private data class Server(val ip: String, val ucp: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -100,12 +102,55 @@ private fun NexusApp() {
     var notice by remember { mutableStateOf("NEXUS siap digunakan • Build 1.3.0") }
     var mods by remember { mutableStateOf(readMods(prefs.getString("mods", "[]") ?: "[]")) }
     var newMod by remember { mutableStateOf("") }
+    var pendingImportModule by remember { mutableStateOf<String?>(null) }
+    var updateInfo by remember { mutableStateOf<NexusUpdateInfo?>(null) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val module = pendingImportModule
+        if (uri != null && module != null) {
+            scope.launch {
+                val resultMessage = try {
+                    "File tersimpan: ${NexusStorage.importFile(context, uri, module)}"
+                } catch (error: Exception) {
+                    "Gagal mengimpor file: ${error.message ?: "kesalahan tidak diketahui"}"
+                }
+                Toast.makeText(context, resultMessage, Toast.LENGTH_LONG).show()
+                pendingImportModule = null
+            }
+        } else {
+            pendingImportModule = null
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        launch {
+            try {
+                NexusStorage.prepareFolders(context)
+                if (prefs.getBoolean("setup_complete", false)) {
+                    val result = NexusInstaller.sync(context) { }
+                    notice = if (result.total > 0) {
+                        "Data NEXUS diperiksa: ${result.completed}/${result.total} file siap."
+                    } else {
+                        "Folder Download/NEXUS/Data siap. Belum ada paket legal yang dipublikasikan."
+                    }
+                }
+            } catch (error: Exception) {
+                notice = "Pemeriksaan data otomatis gagal: ${error.message ?: "cek koneksi"}"
+            }
+        }
+        launch {
+            val latest = try { NexusUpdateChecker.check(context) } catch (_: Exception) { null }
+            updateInfo = latest
+            showUpdateDialog = latest != null
+        }
+    }
 
     fun saveBool(key: String, value: Boolean) { prefs.edit().putBoolean(key, value).apply() }
     fun saveServers(list: List<Server>) {
         servers = list
         val array = JSONArray()
-        list.forEach { array.put(JSONObject().put("name", it.name).put("host", it.host).put("port", it.port).put("ucpApi", it.ucpApi)) }
+        list.forEach { array.put(JSONObject().put("ip", it.ip).put("ucp", it.ucp)) }
         prefs.edit().putString("servers", array.toString()).apply()
     }
     fun saveMods(list: List<String>) {
@@ -132,7 +177,7 @@ private fun NexusApp() {
                         "Servers" -> ServersPage(
                             servers,
                             onAdd = { showAdd = true },
-                            onSelect = { notice = "Server dipilih: ${it.name} (${it.host}:${it.port})" },
+                            onSelect = { notice = "Server dipilih: ${it.ip} • UCP: ${it.ucp}" },
                             onDelete = { saveServers(servers - it); notice = "Server dihapus" }
                         )
                         "Settings" -> SettingsPage(
@@ -150,13 +195,10 @@ private fun NexusApp() {
                             onPreviewRadial = { showRadial = true }
                         )
                         "Mods" -> ModsPage(
-                            mods, newMod, { newMod = it },
-                            onAdd = {
-                                val value = newMod.trim()
-                                if (value.isNotEmpty() && !mods.contains(value)) saveMods(mods + value)
-                                newMod = ""
-                            },
-                            onDelete = { saveMods(mods - it) }
+                            onImport = { module ->
+                                pendingImportModule = module
+                                importLauncher.launch(arrayOf("*/*"))
+                            }
                         )
                         "Chat" -> ChatPage(
                             chatTimestamp, { chatTimestamp = it; saveBool("chat_timestamp", it) },
@@ -194,9 +236,9 @@ private fun NexusApp() {
 
     if (showAdd) AddServerDialog(
         onDismiss = { showAdd = false },
-        onSave = { name, host, port, ucpApi ->
-            if (servers.any { it.host.equals(host, true) && it.port == port }) notice = "Server tersebut sudah tersimpan"
-            else { saveServers(servers + Server(name, host, port, ucpApi)); notice = "$name berhasil disimpan" }
+        onSave = { ip, ucp ->
+            if (servers.any { it.ip.equals(ip, true) }) notice = "IP server tersebut sudah tersimpan"
+            else { saveServers(servers + Server(ip, ucp)); notice = "Server berhasil disimpan" }
             showAdd = false
         }
     )
@@ -207,9 +249,25 @@ private fun NexusApp() {
     if (showAbout) AlertDialog(
         onDismissRequest = { showAbout = false }, containerColor = Surface1,
         title = { Text("NEXUS MOBILE", color = Color.White, fontWeight = FontWeight.Black) },
-        text = { Text("Version 1.3.0 • Android client foundation\n\nAplikasi ini menyediakan antarmuka, profil lokal, server list, dan preferensi konfigurasi. Belum menyertakan GTA San Andreas engine, SA-MP multiplayer core, voice transport, atau loader mod native.", color = Muted) },
+        text = { Text("Version 1.3.0 • Android client foundation\n\nLauncher menyediakan folder staging mod, pengelola server, serta pemeriksaan update. Loader CLEO/AML/MonetLoader/ModLoader dan SA-MP multiplayer native belum aktif sampai integrasi engine tersedia.", color = Muted) },
         confirmButton = { TextButton(onClick = { showAbout = false }) { Text("TUTUP", color = Red) } }
     )
+    if (showUpdateDialog && updateInfo != null) {
+        val update = updateInfo!!
+        AlertDialog(
+            onDismissRequest = { showUpdateDialog = false },
+            containerColor = Surface1,
+            title = { Text("UPDATE NEXUS TERSEDIA", color = Color.White, fontWeight = FontWeight.Black) },
+            text = { Text("Versi ${update.versionName} tersedia.\n\n${update.notes}\n\nBuka halaman rilis resmi GitHub untuk mendapatkan APK.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(update.downloadUrl)))
+                    showUpdateDialog = false
+                }) { Text("BUKA UPDATE", color = Red) }
+            },
+            dismissButton = { TextButton(onClick = { showUpdateDialog = false }) { Text("NANTI", color = Muted) } }
+        )
+    }
     if (showRadial) RadialPreviewDialog(onDismiss = { showRadial = false }, onSelect = {
         notice = "Aksi radial dipilih: $it (preview UI)"
         showRadial = false
@@ -248,23 +306,32 @@ private fun HomePage() {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("NEXUS COMMUNITY", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-        Text("Gabung Discord resmi NEXUS", color = Muted, fontSize = 12.sp)
-        Spacer(Modifier.height(20.dp))
-        Button(
-            onClick = {
-                val intent = android.content.Intent(
-                    android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://discord.gg/rtfc9x4qv")
-                )
-                context.startActivity(intent)
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = Red),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Default.OpenInNew, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("BUKA DISCORD", fontWeight = FontWeight.Bold)
+        Surface(modifier = Modifier.fillMaxWidth(), color = Color(0xFF5865F2), shape = RoundedCornerShape(22.dp)) {
+            Column(
+                Modifier.fillMaxWidth().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(Modifier.size(76.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.SportsEsports, contentDescription = "Discord", tint = Color(0xFF5865F2), modifier = Modifier.size(42.dp))
+                }
+                Text("DISCORD", color = Color.White, fontSize = 12.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
+                Text("NEXUS COMMUNITY", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                Text("Gabung ke komunitas resmi NEXUS.", color = Color(0xFFE7E9FF), fontSize = 12.sp)
+                Button(
+                    onClick = {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://discord.gg/rtfc9x4qv"))
+                        context.startActivity(intent)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF5865F2)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.OpenInNew, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("JOIN DISCORD", fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
@@ -275,32 +342,32 @@ private fun ServersPage(servers: List<Server>, onAdd: () -> Unit, onSelect: (Ser
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("SERVER BROWSER", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
-                Text("Kelola alamat server favoritmu", color = Muted, fontSize = 12.sp)
+                Text("Simpan IP server dan alamat UCP", color = Muted, fontSize = 12.sp)
             }
             Button(onClick = onAdd, colors = ButtonDefaults.buttonColors(containerColor = Red)) { Icon(Icons.Default.Add, null); Text(" ADD") }
         }
         if (servers.isEmpty()) PanelCard {
             Icon(Icons.Default.Dns, null, tint = Muted, modifier = Modifier.size(34.dp))
             Text("Belum ada server", color = Color.White, fontWeight = FontWeight.Bold)
-            Text("Tambahkan IP atau hostname server untuk menyimpannya di daftar.", color = Muted, fontSize = 12.sp)
+            Text("Tambahkan IP server dan URL UCP.", color = Muted, fontSize = 12.sp)
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            items(servers, key = { "${it.host}:${it.port}" }) { server ->
+            items(servers, key = { it.ip }) { server ->
                 PanelCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xFF332126)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Dns, null, tint = Red) }
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(server.name, color = Color.White, fontWeight = FontWeight.Bold)
-                            Text("${server.host}:${server.port}", color = Muted, fontSize = 11.sp)
+                            Text(server.ip, color = Color.White, fontWeight = FontWeight.Bold)
+                            Text(server.ucp, color = Muted, fontSize = 10.sp, maxLines = 1)
                         }
-                        IconButton(onClick = { onSelect(server) }) { Icon(Icons.Default.CheckCircleOutline, "Select", tint = Color(0xFF76D6A0)) }
-                        IconButton(onClick = { onDelete(server) }) { Icon(Icons.Default.DeleteOutline, "Delete", tint = Red) }
+                        IconButton(onClick = { onSelect(server) }) { Icon(Icons.Default.CheckCircleOutline, "Pilih", tint = Color(0xFF76D6A0)) }
+                        IconButton(onClick = { onDelete(server) }) { Icon(Icons.Default.DeleteOutline, "Hapus", tint = Red) }
                     }
                 }
             }
         }
-        Text("Catatan: daftar ini menyimpan alamat secara lokal. Live ping dan status pemain belum tersedia.", color = Muted, fontSize = 11.sp)
+        Text("Server hanya disimpan di daftar. Tombol pilih belum menghubungkan SA-MP.", color = Muted, fontSize = 11.sp)
     }
 }
 
@@ -350,6 +417,17 @@ private fun SettingsPage(
                     Text("BUILD 130", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp))
                 }
             }
+        }
+
+        PanelCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("DEVELOPMENT PROGRESS", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Target progres aplikasi saat ini", color = Muted, fontSize = 10.sp)
+                }
+                Text("50%", color = Color(0xFF8DE0AF), fontWeight = FontWeight.Black, fontSize = 20.sp)
+            }
+            LinearProgressIndicator(progress = 0.5f, modifier = Modifier.fillMaxWidth(), color = Color(0xFF76D6A0), trackColor = Surface2)
         }
 
         PanelCard {
@@ -425,36 +503,36 @@ private fun ControlsPage(keyboard: Boolean, onKeyboard: (Boolean) -> Unit, mouse
 }
 
 @Composable
-private fun ModsPage(mods: List<String>, newMod: String, onNewMod: (String) -> Unit, onAdd: () -> Unit, onDelete: (String) -> Unit) {
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PageTitle("MOD MANAGER", "Catat mod yang ingin dikelola")
-        PanelCard {
-            Text("ADD MOD ENTRY", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            OutlinedTextField(
-                value = newMod, onValueChange = onNewMod,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Nama mod / path file") },
-                placeholder = { Text("contoh: modloader/skin") },
-                singleLine = true
-            )
-            Button(onClick = onAdd, enabled = newMod.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = Red)) {
-                Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("TAMBAH")
-            }
-        }
-        if (mods.isEmpty()) PanelCard { Text("Belum ada entri mod.", color = Color.White); Text("Kamu bisa mencatat nama atau lokasi file di sini.", color = Muted, fontSize = 12.sp) }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f, fill = false)) {
-            items(mods) { item ->
-                PanelCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Extension, null, tint = Red)
-                        Spacer(Modifier.width(10.dp))
-                        Text(item, color = Color.White, modifier = Modifier.weight(1f))
-                        IconButton(onClick = { onDelete(item) }) { Icon(Icons.Default.DeleteOutline, "Hapus", tint = Red) }
+private fun ModsPage(onImport: (String) -> Unit) {
+    val modules = listOf(
+        Triple("CLEO Scripts", "CLEO", "Simpan file skrip CLEO di folder terpisah."),
+        Triple("AML Scripts", "AML", "Simpan plugin atau skrip AML."),
+        Triple("MonetLoader", "MonetLoader", "Simpan skrip untuk MonetLoader."),
+        Triple("ModLoader", "ModLoader", "Simpan paket mod untuk ModLoader."),
+        Triple("Modify Game Files", "GameFiles", "Area staging untuk file game yang ingin dikelola.")
+    )
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        PageTitle("MOD & GAME FILES", "Impor dan rapikan file di Download/NEXUS/Data")
+        modules.forEach { (title, folder, description) ->
+            PanelCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF332126)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Folder, null, tint = Red)
                     }
+                    Column(Modifier.weight(1f)) {
+                        Text(title, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(description, color = Muted, fontSize = 10.sp)
+                        Text("Data/$folder", color = Color(0xFF8DE0AF), fontSize = 10.sp)
+                    }
+                }
+                Button(onClick = { onImport(folder) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Surface2)) {
+                    Icon(Icons.Default.FileUpload, null)
+                    Spacer(Modifier.width(7.dp))
+                    Text("IMPORT FILE")
                 }
             }
         }
-        InfoNote("Mod Manager ini baru menyimpan daftar nama/path secara lokal. Belum menyalin, memasang, atau memuat file mod ke game.")
+        InfoNote("File hanya disalin ke Download/NEXUS/Data agar terlihat di ZArchiver. Loader belum dieksekusi dan file game asli tidak diubah otomatis; integrasi CLEO, AML, MonetLoader, dan ModLoader memerlukan engine/native client yang kompatibel.")
     }
 }
 
@@ -511,6 +589,11 @@ private fun DisplayPage(fullscreen: Boolean, onFullscreen: (Boolean) -> Unit, lo
             SwitchRow("Low graphics preference", "Pilihan grafis untuk pengembangan berikutnya.", low, onLow)
             HorizontalDivider(color = Surface2)
             SwitchRow("FPS counter preference", "Pilihan tampilan penghitung FPS.", fps, onFps)
+        }
+        PanelCard {
+            Text("FPS COUNTER", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(if (fps) "Penghitung FPS dipilih: AKTIF" else "Penghitung FPS dipilih: NONAKTIF", color = Color.White, fontWeight = FontWeight.Bold)
+            Text("Angka FPS di dalam game baru bisa ditampilkan setelah renderer GTA/SA-MP native terpasang. Pilihan FPS ini disimpan di aplikasi.", color = Muted, fontSize = 11.sp)
         }
         PanelCard {
             Text("RESOLUTION PRESETS", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -684,25 +767,21 @@ private fun SwitchRow(title: String, desc: String, checked: Boolean, onChange: (
 }
 
 @Composable
-private fun AddServerDialog(onDismiss: () -> Unit, onSave: (String, String, Int, String) -> Unit) {
-    var name by remember { mutableStateOf("My Server") }
-    var host by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("7777") }
-    var ucpApi by remember { mutableStateOf("") }
+private fun AddServerDialog(onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    var ip by remember { mutableStateOf("") }
+    var ucp by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = Surface1,
         title = { Text("ADD SERVER", color = Color.White, fontWeight = FontWeight.Black) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Server name") }, singleLine = true)
-                OutlinedTextField(host, { host = it }, label = { Text("IP / Hostname") }, singleLine = true)
-                OutlinedTextField(port, { port = it.filter(Char::isDigit).take(5) }, label = { Text("Port") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                OutlinedTextField(ucpApi, { ucpApi = it.trim() }, label = { Text("UCP API HTTPS (opsional)") }, placeholder = { Text("https://servermu.id/api/login") }, singleLine = true)
-                Text("Endpoint UCP harus disediakan pemilik server. Gunakan HTTPS; format API tiap server bisa berbeda.", color = Muted, fontSize = 10.sp)
+                OutlinedTextField(ip, { ip = it.trim() }, label = { Text("IP SERVER") }, placeholder = { Text("123.123.123.123:7777") }, singleLine = true)
+                OutlinedTextField(ucp, { ucp = it.trim() }, label = { Text("URL UCP") }, placeholder = { Text("https://servermu.id/ucp") }, singleLine = true)
+                Text("Isi hanya IP server dan alamat UCP HTTPS dari pemilik server.", color = Muted, fontSize = 10.sp)
             }
         },
         confirmButton = {
-            TextButton(onClick = { val p = port.toIntOrNull(); if (host.isNotBlank() && p != null && p in 1..65535 && (ucpApi.isBlank() || ucpApi.startsWith("https://"))) onSave(name.ifBlank { host }, host.trim(), p, ucpApi.trim()) }) { Text("SAVE", color = Red) }
+            TextButton(onClick = { if (ip.isNotBlank() && ucp.startsWith("https://") && ucp.length > 8) onSave(ip.trim(), ucp.trim()) }) { Text("SAVE", color = Red) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL", color = Muted) } }
     )
@@ -724,9 +803,13 @@ private fun readServers(raw: String): List<Server> = try {
     val array = JSONArray(raw)
     (0 until array.length()).mapNotNull { index ->
         val obj = array.optJSONObject(index) ?: return@mapNotNull null
-        val host = obj.optString("host")
-        val port = obj.optInt("port", 7777)
-        if (host.isBlank() || port !in 1..65535) null else Server(obj.optString("name", host), host, port, obj.optString("ucpApi", ""))
+        val oldHost = obj.optString("host", "")
+        val oldPort = obj.optInt("port", 0)
+        val ip = obj.optString("ip", oldHost).let {
+            if (it.isNotBlank() && oldPort in 1..65535 && !it.contains(":")) "$it:$oldPort" else it
+        }
+        val ucp = obj.optString("ucp", obj.optString("ucpApi", ""))
+        if (ip.isBlank()) null else Server(ip, ucp)
     }
 } catch (_: Exception) { emptyList() }
 

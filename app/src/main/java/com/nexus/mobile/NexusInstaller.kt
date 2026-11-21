@@ -89,9 +89,8 @@ object NexusInstaller {
                 }
 
                 if (eligible.isEmpty()) {
-                    throw IOException(
-                        "Belum ada data yang dapat diunduh. distributables/manifest.json masih kosong atau semua komponen belum memenuhi syarat."
-                    )
+                    onProgress(InstallerProgress(100, "Folder data siap. Belum ada paket legal di manifest untuk diunduh."))
+                    return@withContext InstallerResult(0, 0)
                 }
 
                 var completed = 0
@@ -99,9 +98,14 @@ object NexusInstaller {
                     onProgress(
                         InstallerProgress(
                             (index * 100) / eligible.size,
-                            "Mengunduh ${component.fileName}..."
+                            "Memeriksa ${component.fileName}..."
                         )
                     )
+                    if (isAlreadyPublished(context, component)) {
+                        completed++
+                        onProgress(InstallerProgress((completed * 100) / eligible.size, "Sudah tersedia: ${component.fileName}"))
+                        return@forEachIndexed
+                    }
 
                     val temp = File.createTempFile("nexus-", ".part", context.cacheDir)
                     try {
@@ -146,6 +150,44 @@ object NexusInstaller {
         ) || value.startsWith(
             "https://raw.githubusercontent.com/thomas01ri/nexusmobile/"
         )
+    }
+
+    private fun isAlreadyPublished(context: Context, component: Component): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = context.contentResolver
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+            resolver.query(
+                collection,
+                arrayOf(MediaStore.MediaColumns._ID),
+                selection,
+                arrayOf(component.fileName, "$DOWNLOAD_FOLDER/"),
+                null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val uri = android.content.ContentUris.withAppendedId(collection, cursor.getLong(0))
+                    val actualHash = resolver.openInputStream(uri)?.use { sha256(it) }
+                    if (actualHash == component.sha256) return true
+                }
+            }
+            return false
+        }
+        val base = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return false
+        val file = File(File(base, "NEXUS"), component.fileName)
+        return file.isFile && sha256(file) == component.sha256
+    }
+
+    private fun sha256(input: java.io.InputStream): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        input.use {
+            val buffer = ByteArray(32 * 1024)
+            while (true) {
+                val count = it.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
     }
 
     private fun downloadAndVerify(
