@@ -40,7 +40,7 @@ private val Surface1 = Color(0xFF141A23)
 private val Surface2 = Color(0xFF1D2633)
 private val Red = Color(0xFFE53935)
 private val Muted = Color(0xFF9AA7B8)
-private data class Server(val name: String, val host: String, val port: Int)
+private data class Server(val name: String, val host: String, val port: Int, val ucpApi: String = "")
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,7 +97,7 @@ private fun NexusApp() {
     var chatTimestamp by remember { mutableStateOf(prefs.getBoolean("chat_timestamp", true)) }
     var chatBackground by remember { mutableStateOf(prefs.getBoolean("chat_background", true)) }
     var radialKey by remember { mutableStateOf(prefs.getString("radial_key", "F11") ?: "F11") }
-    var notice by remember { mutableStateOf("NEXUS siap digunakan • Build 1.2.0") }
+    var notice by remember { mutableStateOf("NEXUS siap digunakan • Build 1.3.0") }
     var mods by remember { mutableStateOf(readMods(prefs.getString("mods", "[]") ?: "[]")) }
     var newMod by remember { mutableStateOf("") }
 
@@ -105,7 +105,7 @@ private fun NexusApp() {
     fun saveServers(list: List<Server>) {
         servers = list
         val array = JSONArray()
-        list.forEach { array.put(JSONObject().put("name", it.name).put("host", it.host).put("port", it.port)) }
+        list.forEach { array.put(JSONObject().put("name", it.name).put("host", it.host).put("port", it.port).put("ucpApi", it.ucpApi)) }
         prefs.edit().putString("servers", array.toString()).apply()
     }
     fun saveMods(list: List<String>) {
@@ -128,15 +128,7 @@ private fun NexusApp() {
                                 notice = if (gtaInstalled) "GTA San Andreas terdeteksi di perangkat." else "GTA SA belum terdeteksi. Pasang game resmi sebelum bermain."
                             }
                         )
-                        "Home" -> HomePage(
-                            nickname, servers.size, notice, gtaInstalled,
-                            onConnect = {
-                                notice = if (gtaInstalled) "GTA SA terdeteksi, tetapi client multiplayer belum dapat diintegrasikan sebelum lisensi dan kompatibilitasnya lolos pemeriksaan." else "GTA SA belum terdeteksi. Pasang game resmi terlebih dahulu."
-                            },
-                            onServers = { page = "Servers" },
-                            onProfile = { showProfile = true },
-                            onRadial = { showRadial = true }
-                        )
+                        "Home" -> HomePage()
                         "Servers" -> ServersPage(
                             servers,
                             onAdd = { showAdd = true },
@@ -202,9 +194,9 @@ private fun NexusApp() {
 
     if (showAdd) AddServerDialog(
         onDismiss = { showAdd = false },
-        onSave = { name, host, port ->
+        onSave = { name, host, port, ucpApi ->
             if (servers.any { it.host.equals(host, true) && it.port == port }) notice = "Server tersebut sudah tersimpan"
-            else { saveServers(servers + Server(name, host, port)); notice = "$name berhasil disimpan" }
+            else { saveServers(servers + Server(name, host, port, ucpApi)); notice = "$name berhasil disimpan" }
             showAdd = false
         }
     )
@@ -215,7 +207,7 @@ private fun NexusApp() {
     if (showAbout) AlertDialog(
         onDismissRequest = { showAbout = false }, containerColor = Surface1,
         title = { Text("NEXUS MOBILE", color = Color.White, fontWeight = FontWeight.Black) },
-        text = { Text("Version 1.2.0 • Android client foundation\n\nAplikasi ini menyediakan antarmuka, profil lokal, server list, dan preferensi konfigurasi. Belum menyertakan GTA San Andreas engine, SA-MP multiplayer core, voice transport, atau loader mod native.", color = Muted) },
+        text = { Text("Version 1.3.0 • Android client foundation\n\nAplikasi ini menyediakan antarmuka, profil lokal, server list, dan preferensi konfigurasi. Belum menyertakan GTA San Andreas engine, SA-MP multiplayer core, voice transport, atau loader mod native.", color = Muted) },
         confirmButton = { TextButton(onClick = { showAbout = false }) { Text("TUTUP", color = Red) } }
     )
     if (showRadial) RadialPreviewDialog(onDismiss = { showRadial = false }, onSelect = {
@@ -241,7 +233,7 @@ private fun Header(onAbout: () -> Unit, onExit: () -> Unit) {
             Text("SA-MP HUB", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
         }
         Surface(color = Color(0xFF2C1B20), shape = CircleShape) {
-            Text(" v1.2.0 ", color = Color(0xFFFFAAA5), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+            Text(" v1.3.0 ", color = Color(0xFFFFAAA5), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
         }
         IconButton(onClick = onExit) { Icon(Icons.Default.ExitToApp, "Keluar", tint = Muted) }
         IconButton(onClick = onAbout) { Icon(Icons.Default.Info, "About", tint = Muted) }
@@ -249,48 +241,31 @@ private fun Header(onAbout: () -> Unit, onExit: () -> Unit) {
 }
 
 @Composable
-private fun HomePage(nick: String, serverCount: Int, notice: String, gameInstalled: Boolean, onConnect: () -> Unit, onServers: () -> Unit, onProfile: () -> Unit, onRadial: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("NEXUS MOBILE", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Black)
-        Text("Mainkan bersama komunitas SA-MP", color = Muted, fontSize = 12.sp)
-        PanelCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Person, null, tint = Red)
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("PROFILE", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(nick, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                }
-                TextButton(onClick = onProfile) { Text("EDIT", color = Red) }
-            }
+private fun HomePage() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Column(
+        Modifier.fillMaxSize().padding(22.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("NEXUS COMMUNITY", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
+        Text("Gabung Discord resmi NEXUS", color = Muted, fontSize = 12.sp)
+        Spacer(Modifier.height(20.dp))
+        Button(
+            onClick = {
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("https://discord.gg/rtfc9x4qv")
+                )
+                context.startActivity(intent)
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Red),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Default.OpenInNew, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("BUKA DISCORD", fontWeight = FontWeight.Bold)
         }
-        PanelCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(if (gameInstalled) Icons.Default.CheckCircle else Icons.Default.Warning, null, tint = if (gameInstalled) Color(0xFF76D6A0) else Color(0xFFFFC36B))
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("GTA SAN ANDREAS", color = Color.White, fontWeight = FontWeight.Bold)
-                    Text(if (gameInstalled) "Terpasang • terdeteksi" else "Belum terdeteksi", color = Muted, fontSize = 11.sp)
-                }
-            }
-            Button(onClick = onConnect, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Red), shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Default.PlayArrow, null)
-                Spacer(Modifier.width(6.dp))
-                Text("MASUK / CONNECT", fontWeight = FontWeight.Bold)
-            }
-            Text("Koneksi multiplayer akan aktif setelah client native lolos pemeriksaan lisensi dan kompatibilitas.", color = Muted, fontSize = 10.sp)
-        }
-        PanelCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("SERVER TERSIMPAN", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text("$serverCount server", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                }
-                TextButton(onClick = onServers) { Text("BUKA", color = Red) }
-            }
-        }
-        TextButton(onClick = onRadial) { Icon(Icons.Default.GridView, null); Spacer(Modifier.width(6.dp)); Text("Preview radial menu") }
-        Text(notice, color = Muted, fontSize = 11.sp)
     }
 }
 
@@ -330,32 +305,91 @@ private fun ServersPage(servers: List<Server>, onAdd: () -> Unit, onSelect: (Ser
 }
 
 @Composable
-private fun SettingsPage(low: Boolean, onLow: (Boolean) -> Unit, fps: Boolean, onFps: (Boolean) -> Unit, notifications: Boolean, onNotifications: (Boolean) -> Unit, onOpen: (String) -> Unit, onAbout: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("PENGATURAN", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-        PanelCard {
-            Text("APLIKASI", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            SwitchRow("Low graphics", "Preferensi untuk integrasi game berikutnya.", low, onLow)
-            HorizontalDivider(color = Surface2)
-            SwitchRow("FPS counter", "Simpan preferensi penghitung FPS.", fps, onFps)
-            HorizontalDivider(color = Surface2)
-            SwitchRow("Notifikasi", "Preferensi notifikasi NEXUS.", notifications, onNotifications)
+private fun SettingsPage(
+    low: Boolean,
+    onLow: (Boolean) -> Unit,
+    fps: Boolean,
+    onFps: (Boolean) -> Unit,
+    notifications: Boolean,
+    onNotifications: (Boolean) -> Unit,
+    onOpen: (String) -> Unit,
+    onAbout: () -> Unit
+) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("SETTINGS", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Black)
+            Text("Atur preferensi aplikasi NEXUS Mobile", color = Muted, fontSize = 12.sp)
         }
+
         PanelCard {
-            Text("FITUR", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            ModuleRow("Game Installer", "Deteksi GTA SA dan komponen NEXUS", Icons.Default.Download, { onOpen("Installer") })
-            ModuleRow("Keyboard & Mouse", "Pengaturan input", Icons.Default.Keyboard, { onOpen("Controls") })
-            ModuleRow("Mod Manager", "Daftar mod lokal", Icons.Default.Folder, { onOpen("Mods") })
-            ModuleRow("Chat & Voice", "Preferensi tampilan dan suara", Icons.Default.Chat, { onOpen("Chat") })
-            ModuleRow("Display", "Preferensi tampilan", Icons.Default.DisplaySettings, { onOpen("Display") })
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFF332126)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Tune, contentDescription = null, tint = Red, modifier = Modifier.size(27.dp))
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("NEXUS CONTROL CENTER", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Preferensi aplikasi dan modul client", color = Muted, fontSize = 11.sp)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(color = Color(0xFF263A31), shape = RoundedCornerShape(8.dp)) {
+                    Text("VERSION 1.3.0", color = Color(0xFF8DE0AF), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp))
+                }
+                Surface(color = Surface2, shape = RoundedCornerShape(8.dp)) {
+                    Text("BUILD 130", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp))
+                }
+            }
         }
+
+        PanelCard {
+            Text("DISPLAY", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            SwitchRow("Low graphics preference", "Preferensi kualitas grafis untuk integrasi game.", low, onLow)
+            HorizontalDivider(color = Surface2)
+            SwitchRow("FPS counter preference", "Simpan pilihan untuk penghitung FPS.", fps, onFps)
+            ModuleRow("Display options", "Buka preferensi tampilan tambahan", Icons.Default.DisplaySettings, { onOpen("Display") })
+        }
+
+        PanelCard {
+            Text("KEYBOARD & MOUSE", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            ModuleRow("Input configuration", "Keyboard, mouse, klik, dan radial menu", Icons.Default.Keyboard, { onOpen("Controls") })
+            InfoNote("Pengaturan input tersedia sebagai konfigurasi. Integrasi input langsung ke game belum aktif.")
+        }
+
+        PanelCard {
+            Text("CLIENT & MODULES", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            ModuleRow("Game Installer", "Deteksi game dan unduh komponen resmi", Icons.Default.Download, { onOpen("Installer") })
+            HorizontalDivider(color = Surface2)
+            ModuleRow("Mod Manager", "Catatan mod lokal", Icons.Default.Folder, { onOpen("Mods") })
+            HorizontalDivider(color = Surface2)
+            ModuleRow("Chat & Voice", "Preferensi chat dan audio", Icons.Default.Chat, { onOpen("Chat") })
+        }
+
+        PanelCard {
+            Text("NOTIFICATIONS", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            SwitchRow("App notifications preference", "Simpan preferensi notifikasi NEXUS.", notifications, onNotifications)
+        }
+
         PanelCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("NEXUS MOBILE", color = Color.White, fontWeight = FontWeight.Bold)
-                    Text("Version 1.2.0 • Build 120", color = Muted, fontSize = 11.sp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("ABOUT NEXUS", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Informasi aplikasi, versi, dan lisensi", color = Muted, fontSize = 11.sp)
                 }
-                TextButton(onClick = onAbout) { Text("ABOUT", color = Red) }
+                TextButton(onClick = onAbout) {
+                    Text("OPEN", color = Red, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -650,10 +684,11 @@ private fun SwitchRow(title: String, desc: String, checked: Boolean, onChange: (
 }
 
 @Composable
-private fun AddServerDialog(onDismiss: () -> Unit, onSave: (String, String, Int) -> Unit) {
+private fun AddServerDialog(onDismiss: () -> Unit, onSave: (String, String, Int, String) -> Unit) {
     var name by remember { mutableStateOf("My Server") }
     var host by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("7777") }
+    var ucpApi by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = Surface1,
         title = { Text("ADD SERVER", color = Color.White, fontWeight = FontWeight.Black) },
@@ -662,10 +697,12 @@ private fun AddServerDialog(onDismiss: () -> Unit, onSave: (String, String, Int)
                 OutlinedTextField(name, { name = it }, label = { Text("Server name") }, singleLine = true)
                 OutlinedTextField(host, { host = it }, label = { Text("IP / Hostname") }, singleLine = true)
                 OutlinedTextField(port, { port = it.filter(Char::isDigit).take(5) }, label = { Text("Port") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(ucpApi, { ucpApi = it.trim() }, label = { Text("UCP API HTTPS (opsional)") }, placeholder = { Text("https://servermu.id/api/login") }, singleLine = true)
+                Text("Endpoint UCP harus disediakan pemilik server. Gunakan HTTPS; format API tiap server bisa berbeda.", color = Muted, fontSize = 10.sp)
             }
         },
         confirmButton = {
-            TextButton(onClick = { val p = port.toIntOrNull(); if (host.isNotBlank() && p != null && p in 1..65535) onSave(name.ifBlank { host }, host.trim(), p) }) { Text("SAVE", color = Red) }
+            TextButton(onClick = { val p = port.toIntOrNull(); if (host.isNotBlank() && p != null && p in 1..65535 && (ucpApi.isBlank() || ucpApi.startsWith("https://"))) onSave(name.ifBlank { host }, host.trim(), p, ucpApi.trim()) }) { Text("SAVE", color = Red) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL", color = Muted) } }
     )
@@ -689,7 +726,7 @@ private fun readServers(raw: String): List<Server> = try {
         val obj = array.optJSONObject(index) ?: return@mapNotNull null
         val host = obj.optString("host")
         val port = obj.optInt("port", 7777)
-        if (host.isBlank() || port !in 1..65535) null else Server(obj.optString("name", host), host, port)
+        if (host.isBlank() || port !in 1..65535) null else Server(obj.optString("name", host), host, port, obj.optString("ucpApi", ""))
     }
 } catch (_: Exception) { emptyList() }
 
