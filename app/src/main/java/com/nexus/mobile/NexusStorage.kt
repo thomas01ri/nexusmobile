@@ -120,7 +120,7 @@ object NexusStorage {
             target.delete()
             throw error
         }
-        "Android/media/$MEDIA_GAME_FOLDER/MonetLoader/$name"
+        return "Android/media/$MEDIA_GAME_FOLDER/MonetLoader/$name"
     }
 
     private fun ensureMarker(context: Context, folder: String) {
