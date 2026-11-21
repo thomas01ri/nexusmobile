@@ -306,32 +306,23 @@ private fun HomePage() {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Surface(modifier = Modifier.fillMaxWidth(), color = Color(0xFF5865F2), shape = RoundedCornerShape(22.dp)) {
-            Column(
-                Modifier.fillMaxWidth().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(Modifier.size(76.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.SportsEsports, contentDescription = "Discord", tint = Color(0xFF5865F2), modifier = Modifier.size(42.dp))
-                }
-                Text("DISCORD", color = Color.White, fontSize = 12.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
-                Text("NEXUS COMMUNITY", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                Text("Gabung ke komunitas resmi NEXUS.", color = Color(0xFFE7E9FF), fontSize = 12.sp)
-                Button(
-                    onClick = {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://discord.gg/rtfc9x4qv"))
-                        context.startActivity(intent)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF5865F2)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.OpenInNew, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("JOIN DISCORD", fontWeight = FontWeight.Bold)
-                }
-            }
+        Text("NEXUS COMMUNITY", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
+        Text("Gabung Discord resmi NEXUS", color = Muted, fontSize = 12.sp)
+        Spacer(Modifier.height(20.dp))
+        Button(
+            onClick = {
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("https://discord.gg/rtfc9x4qv")
+                )
+                context.startActivity(intent)
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Red),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Default.OpenInNew, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("BUKA DISCORD", fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -417,17 +408,6 @@ private fun SettingsPage(
                     Text("BUILD 130", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp))
                 }
             }
-        }
-
-        PanelCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("DEVELOPMENT PROGRESS", color = Color.White, fontWeight = FontWeight.Bold)
-                    Text("Target progres aplikasi saat ini", color = Muted, fontSize = 10.sp)
-                }
-                Text("50%", color = Color(0xFF8DE0AF), fontWeight = FontWeight.Black, fontSize = 20.sp)
-            }
-            LinearProgressIndicator(progress = 0.5f, modifier = Modifier.fillMaxWidth(), color = Color(0xFF76D6A0), trackColor = Surface2)
         }
 
         PanelCard {
