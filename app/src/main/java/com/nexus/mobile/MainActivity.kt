@@ -106,12 +106,30 @@ private fun NexusApp() {
     var updateInfo by remember { mutableStateOf<NexusUpdateInfo?>(null) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    var monetMediaTreeUri by remember { mutableStateOf(prefs.getString("monet_media_tree_uri", null)) }
+    val mediaTreeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            try {
+                val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+                monetMediaTreeUri = uri.toString()
+                prefs.edit().putString("monet_media_tree_uri", uri.toString()).apply()
+                scope.launch {
+                    val result = runCatching { NexusStorage.prepareMonetLoaderMediaFolder(context, uri) }
+                    Toast.makeText(context, result.getOrElse { "Gagal membuat folder: ${it.message}" }, Toast.LENGTH_LONG).show()
+                }
+            } catch (error: Exception) {
+                Toast.makeText(context, "Izin Android/media gagal: ${error.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val module = pendingImportModule
         if (uri != null && module != null) {
             scope.launch {
                 val resultMessage = try {
-                    "File tersimpan: ${NexusStorage.importFile(context, uri, module)}"
+                    "File tersimpan: ${NexusStorage.importFile(context, uri, module, monetMediaTreeUri)}"
                 } catch (error: Exception) {
                     "Gagal mengimpor file: ${error.message ?: "kesalahan tidak diketahui"}"
                 }
@@ -198,7 +216,9 @@ private fun NexusApp() {
                             onImport = { module ->
                                 pendingImportModule = module
                                 importLauncher.launch(arrayOf("*/*"))
-                            }
+                            },
+                            onChooseMonetMedia = { mediaTreeLauncher.launch(null) },
+                            monetMediaReady = !monetMediaTreeUri.isNullOrBlank()
                         )
                         "Chat" -> ChatPage(
                             chatTimestamp, { chatTimestamp = it; saveBool("chat_timestamp", it) },
@@ -301,29 +321,63 @@ private fun Header(onAbout: () -> Unit, onExit: () -> Unit) {
 @Composable
 private fun HomePage() {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val discordBlue = Color(0xFF5865F2)
     Column(
-        Modifier.fillMaxSize().padding(22.dp),
-        verticalArrangement = Arrangement.Center,
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("NEXUS COMMUNITY", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-        Text("Gabung Discord resmi NEXUS", color = Muted, fontSize = 12.sp)
-        Spacer(Modifier.height(20.dp))
-        Button(
-            onClick = {
-                val intent = android.content.Intent(
-                    android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://discord.gg/rtfc9x4qv")
+        PanelCard {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Surface(color = discordBlue, shape = RoundedCornerShape(16.dp), modifier = Modifier.size(58.dp)) {
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(R.drawable.discord_mark),
+                        contentDescription = "Discord",
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("NEXUS DISCORD", color = Color.White, fontWeight = FontWeight.Black)
+                    Text("Community • Announcements • Support", color = Muted, fontSize = 10.sp)
+                }
+            }
+            Button(
+                onClick = {
+                    val intent = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse("https://discord.gg/rtfc9x4qv")
+                    )
+                    context.startActivity(intent)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = discordBlue),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.ui.res.painterResource(R.drawable.discord_mark),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
                 )
-                context.startActivity(intent)
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = Red),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Default.OpenInNew, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("BUKA DISCORD", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                Text("JOIN DISCORD", fontWeight = FontWeight.Bold)
+            }
         }
+        PanelCard {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("DEVELOPMENT PROGRESS", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("NEXUS Mobile v1.3.0", color = Muted, fontSize = 10.sp)
+                }
+                Text("50%", color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp)
+            }
+            LinearProgressIndicator(progress = 0.5f, modifier = Modifier.fillMaxWidth(), color = discordBlue, trackColor = Surface2)
+        }
+        Text(
+            "Penyimpanan mod tersedia di Download/NEXUS/Data. Loader game dan multiplayer native masih memerlukan integrasi engine.",
+            color = Muted,
+            fontSize = 11.sp
+        )
     }
 }
 
@@ -483,17 +537,23 @@ private fun ControlsPage(keyboard: Boolean, onKeyboard: (Boolean) -> Unit, mouse
 }
 
 @Composable
-private fun ModsPage(onImport: (String) -> Unit) {
+private fun ModsPage(onImport: (String) -> Unit, onChooseMonetMedia: () -> Unit, monetMediaReady: Boolean) {
     val modules = listOf(
-        Triple("CLEO Scripts", "CLEO", "Simpan file skrip CLEO di folder terpisah."),
-        Triple("AML Scripts", "AML", "Simpan plugin atau skrip AML."),
-        Triple("MonetLoader", "MonetLoader", "Simpan skrip untuk MonetLoader."),
-        Triple("ModLoader", "ModLoader", "Simpan paket mod untuk ModLoader."),
-        Triple("Modify Game Files", "GameFiles", "Area staging untuk file game yang ingin dikelola.")
+        Triple("Configs", "configs", "File konfigurasi NEXUS."),
+        Triple("Game Files", "files", "File yang ingin dikelola secara manual."),
+        Triple("CLEO Scripts", "CLEO", "Tempat menyimpan skrip CLEO."),
+        Triple("AML Scripts", "AML", "Tempat menyimpan plugin atau skrip AML."),
+        Triple("MonetLoader", "MonetLoader", "Impor ke Android/media setelah izin folder diberikan."),
+        Triple("ModLoader", "ModLoader", "Tempat menyimpan paket mod ModLoader.")
     )
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PageTitle("MOD & GAME FILES", "Impor dan rapikan file di Download/NEXUS/Data")
+        PageTitle("MOD & GAME FILES", "Download/NEXUS/Data")
         modules.forEach { (title, folder, description) ->
+            val path = when (folder) {
+                "configs" -> "Data/configs"
+                "files" -> "Data/files"
+                else -> "Data/mods/$folder"
+            }
             PanelCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF332126)), contentAlignment = Alignment.Center) {
@@ -502,7 +562,20 @@ private fun ModsPage(onImport: (String) -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text(title, color = Color.White, fontWeight = FontWeight.Bold)
                         Text(description, color = Muted, fontSize = 10.sp)
-                        Text("Data/$folder", color = Color(0xFF8DE0AF), fontSize = 10.sp)
+                        Text(path, color = Color(0xFF8DE0AF), fontSize = 10.sp)
+                    }
+                }
+                if (folder == "MonetLoader") {
+                    Text(
+                        if (monetMediaReady) "Lokasi Android/media sudah dipilih."
+                        else "Pilih folder Android/media satu kali agar file MonetLoader disimpan di sana.",
+                        color = Muted,
+                        fontSize = 10.sp
+                    )
+                    OutlinedButton(onClick = onChooseMonetMedia, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.FolderOpen, null)
+                        Spacer(Modifier.width(7.dp))
+                        Text(if (monetMediaReady) "GANTI LOKASI ANDROID/MEDIA" else "PILIH ANDROID/MEDIA")
                     }
                 }
                 Button(onClick = { onImport(folder) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Surface2)) {
@@ -512,7 +585,9 @@ private fun ModsPage(onImport: (String) -> Unit) {
                 }
             }
         }
-        InfoNote("File hanya disalin ke Download/NEXUS/Data agar terlihat di ZArchiver. Loader belum dieksekusi dan file game asli tidak diubah otomatis; integrasi CLEO, AML, MonetLoader, dan ModLoader memerlukan engine/native client yang kompatibel.")
+        InfoNote(
+            "Android/data milik package lain dikunci Android 11 ke atas. File biasa disimpan di Download/NEXUS/Data. MonetLoader dapat diarahkan ke Android/media setelah folder dipilih. File impor belum dijalankan ke game."
+        )
     }
 }
 
@@ -746,22 +821,90 @@ private fun SwitchRow(title: String, desc: String, checked: Boolean, onChange: (
     }
 }
 
+private fun isValidServerAddress(raw: String): Boolean {
+    val value = raw.trim()
+    if (value.isEmpty() || value.length > 253 || value.any { it.isWhitespace() }) return false
+    val colon = value.lastIndexOf(':')
+    val host: String
+    if (colon >= 0) {
+        if (value.indexOf(':') != colon) return false
+        host = value.substring(0, colon)
+        val port = value.substring(colon + 1).toIntOrNull() ?: return false
+        if (port !in 1..65535) return false
+    } else host = value
+    val octets = host.split('.')
+    val ipv4 = octets.size == 4 && octets.all {
+        val number = it.toIntOrNull()
+        number != null && number in 0..255 && it.isNotEmpty()
+    }
+    val hostname = Regex("(?i)^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")
+    return ipv4 || hostname.matches(host)
+}
+
+private fun isValidUcpUrl(raw: String): Boolean {
+    val value = raw.trim()
+    if (!value.startsWith("https://", ignoreCase = true)) return false
+    val uri = android.net.Uri.parse(value)
+    return uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() && uri.host!!.contains(".")
+}
+
 @Composable
 private fun AddServerDialog(onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
     var ip by remember { mutableStateOf("") }
     var ucp by remember { mutableStateOf("") }
+    var ipError by remember { mutableStateOf(false) }
+    var ucpError by remember { mutableStateOf(false) }
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = Color.White,
+        unfocusedTextColor = Color.White,
+        focusedLabelColor = Color.White,
+        unfocusedLabelColor = Color.White,
+        focusedPlaceholderColor = Muted,
+        unfocusedPlaceholderColor = Muted,
+        focusedBorderColor = Red,
+        unfocusedBorderColor = Muted,
+        cursorColor = Red,
+        errorTextColor = Color.White,
+        errorLabelColor = Color(0xFFFF8A80),
+        errorBorderColor = Color(0xFFFF8A80)
+    )
     AlertDialog(
-        onDismissRequest = onDismiss, containerColor = Surface1,
+        onDismissRequest = onDismiss,
+        containerColor = Surface1,
         title = { Text("ADD SERVER", color = Color.White, fontWeight = FontWeight.Black) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(ip, { ip = it.trim() }, label = { Text("IP SERVER") }, placeholder = { Text("123.123.123.123:7777") }, singleLine = true)
-                OutlinedTextField(ucp, { ucp = it.trim() }, label = { Text("URL UCP") }, placeholder = { Text("https://servermu.id/ucp") }, singleLine = true)
-                Text("Isi hanya IP server dan alamat UCP HTTPS dari pemilik server.", color = Muted, fontSize = 10.sp)
+                OutlinedTextField(
+                    value = ip,
+                    onValueChange = { ip = it; ipError = false },
+                    label = { Text("IP SERVER") },
+                    placeholder = { Text("123.123.123.123:7777") },
+                    singleLine = true,
+                    isError = ipError,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    colors = fieldColors
+                )
+                if (ipError) Text("Masukkan IP/domain yang benar, boleh ditambah :port.", color = Color(0xFFFF8A80), fontSize = 10.sp)
+                OutlinedTextField(
+                    value = ucp,
+                    onValueChange = { ucp = it; ucpError = false },
+                    label = { Text("URL UCP") },
+                    placeholder = { Text("https://servermu.id/ucp") },
+                    singleLine = true,
+                    isError = ucpError,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    colors = fieldColors
+                )
+                if (ucpError) Text("Masukkan URL UCP yang valid dan diawali https://.", color = Color(0xFFFF8A80), fontSize = 10.sp)
+                Text("Isi IP server dan alamat UCP HTTPS dari pemilik server.", color = Muted, fontSize = 10.sp)
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (ip.isNotBlank() && ucp.startsWith("https://") && ucp.length > 8) onSave(ip.trim(), ucp.trim()) }) { Text("SAVE", color = Red) }
+            TextButton(onClick = {
+                ipError = !isValidServerAddress(ip)
+                ucpError = !isValidUcpUrl(ucp)
+                if (!ipError && !ucpError) onSave(ip.trim(), ucp.trim())
+            }) { Text("SAVE", color = Red) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL", color = Muted) } }
     )
@@ -797,3 +940,6 @@ private fun readMods(raw: String): List<String> = try {
     val array = JSONArray(raw)
     (0 until array.length()).mapNotNull { index -> array.optString(index).takeIf { it.isNotBlank() } }
 } catch (_: Exception) { emptyList() }
+
+
+// NEXUS_V130_BUGFIX_APPLIED
