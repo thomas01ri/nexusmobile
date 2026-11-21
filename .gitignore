@@ -6,3 +6,5 @@ local.properties
 .DS_Store
 .externalNativeBuild/
 .cxx/
+.nexus-v*-backup-*/
+main
